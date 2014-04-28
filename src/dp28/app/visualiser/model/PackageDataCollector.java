@@ -5,7 +5,6 @@ import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Semaphore;
 
 import android.content.pm.IPackageStatsObserver;
 import android.content.pm.IPackageStatsObserver.Stub;
@@ -23,21 +22,55 @@ import android.os.RemoteException;
  */
 public class PackageDataCollector {
 
-	private Collection<PackageStats> packages;
+	private Collection<InstalledPackage> packages;
 	private PackageManager packageManager;
-	private Semaphore semaphore;
+	private int packagesToConvert;
 
 	public PackageDataCollector(PackageManager packageManager) {
-		packages = new ConcurrentLinkedQueue<PackageStats>();
+		packages = new ConcurrentLinkedQueue<InstalledPackage>();
 		this.packageManager = packageManager;
-		semaphore = new Semaphore(1, true);
 	}
 
-	public Collection<PackageStats> findPackageStatistics() {
-		List<PackageInfo> installedPackages = packageManager.getInstalledPackages(0);
+	/**
+	 * A synchronous method for finding all the installed packages on the
+	 * device. WARNING: this may take a long time, depending on the device (eg,
+	 * Samsung Galaxy Ace takes up to 20 seconds)
+	 * 
+	 * @return
+	 */
+	public Collection<InstalledPackage> findAllInstalledPackages() {
+		startFindInstalledPackages();
+		while (packagesToConvert > 0)
+			;// Wait until size data has been discovered for all packages.
+		return packages;
+	}
 
+	/**
+	 * Starts an asynchronous search for every package installed on this device.
+	 */
+	public void startFindInstalledPackages() {
+		List<PackageInfo> installedPackages = packageManager.getInstalledPackages(0);
+		packagesToConvert = installedPackages.size();
 		packages.clear();
 		addAllPackageStats(installedPackages);
+	}
+
+	/**
+	 * Whether the search for installed packages has finished yet.
+	 */
+	public boolean isFinishedFindingInstalledPackages() {
+		return packagesToConvert == 0;
+	}
+
+	/**
+	 * 
+	 * @return A {@link Collection} of {@link InstalledPackage}s, one for each
+	 *         package installed on this device. This will be empty unless
+	 *         {@link #startFindInstalledPackages()} has been called beforehand
+	 *         and may change if {@link #isFinishedFindingInstalledPackages()}
+	 *         is not true.
+	 */
+	public Collection<InstalledPackage> getInstalledPackages() {
 		return packages;
 	}
 
@@ -48,22 +81,8 @@ public class PackageDataCollector {
 	}
 
 	private void addPackageStatsForPackage(PackageInfo packageInfo) {
-		aquireSemaphore();
-		invokeGetPackageSizeInfo(packageInfo);
-	}
-
-	/**
-	 * 
-	 * @param packageInfo
-	 */
-	private void invokeGetPackageSizeInfo(PackageInfo packageInfo) {
 		try {
-			Method getPackageSizeInfo = packageManager.getClass()
-														.getMethod(	"getPackageSizeInfo",
-																	String.class,
-																	IPackageStatsObserver.class);
-			IPackageStatsObserver.Stub observer = createPackageStatsObserver();
-			getPackageSizeInfo.invoke(packageManager, packageInfo.packageName, observer);
+			invokeGetPackageSizeInfo(packageInfo);
 		}
 		catch (InvocationTargetException e) {
 			e.getTargetException().printStackTrace();
@@ -74,17 +93,24 @@ public class PackageDataCollector {
 	}
 
 	/**
-	 * Ensures that the code following the call to this method is only accessed
-	 * by one thread at a time. Necessary as the aquisition of the statistics
-	 * runs on a separate thread.
+	 * 
+	 * @param packageInfo
+	 * @throws NoSuchMethodException
+	 * @throws InvocationTargetException
+	 * @throws IllegalArgumentException
+	 * @throws IllegalAccessException
 	 */
-	private void aquireSemaphore() {
-		try {
-			semaphore.acquire();
-		}
-		catch (InterruptedException e) {
-			e.printStackTrace();
-		}
+	private void invokeGetPackageSizeInfo(PackageInfo packageInfo)	throws NoSuchMethodException,
+																	IllegalAccessException,
+																	IllegalArgumentException,
+																	InvocationTargetException {
+		Method getPackageSizeInfo = packageManager.getClass()
+													.getMethod(	"getPackageSizeInfo",
+																String.class,
+																IPackageStatsObserver.class);
+		IPackageStatsObserver.Stub observer = createPackageStatsObserver();
+		getPackageSizeInfo.invoke(packageManager, packageInfo.packageName, observer);
+
 	}
 
 	/**
@@ -95,16 +121,16 @@ public class PackageDataCollector {
 	 * @return
 	 */
 	private Stub createPackageStatsObserver() {
+		return new PackageStatsObserver();
+	}
 
-		IPackageStatsObserver.Stub observer = new IPackageStatsObserver.Stub() {
+	private class PackageStatsObserver extends IPackageStatsObserver.Stub {
 
-			@Override
-			public void onGetStatsCompleted(PackageStats packageStats, boolean succeeded) throws RemoteException {
-				packages.add(packageStats);
-				semaphore.release();
-			}
-		};
-
-		return observer;
+		@Override
+		public void onGetStatsCompleted(PackageStats packageStats, boolean succeeded) throws RemoteException {
+			InstalledPackage installed = new InstalledPackage(packageStats, packageManager);
+			packages.add(installed);
+			packagesToConvert--;
+		}
 	}
 }

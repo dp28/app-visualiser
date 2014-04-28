@@ -8,7 +8,6 @@ import java.util.List;
 
 import android.app.Activity;
 import android.content.pm.PackageManager;
-import android.content.pm.PackageStats;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Menu;
@@ -28,23 +27,18 @@ public class MainActivity extends Activity {
 		ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
 																android.R.layout.simple_list_item_1);
 		listView.setAdapter(adapter);
-		adapter.add("test");
 		PackageManager packageManager = getPackageManager();
 		PackageDataCollector collector = new PackageDataCollector(packageManager);
-		List<InstalledPackage> packages = new ArrayList<InstalledPackage>();
 
 		Date start = new Date();
-		Collection<PackageStats> packStats = collector.findPackageStatistics();
-		Log.d("MAIN", "find time: " + ((new Date()).getTime() - start.getTime()) / 1000.0);
+		Collection<InstalledPackage> packages = collector.findAllInstalledPackages();
+		Log.d("MAIN", "find and convert time: " + ((new Date()).getTime() - start.getTime())
+				/ 1000.0);
 		start = new Date();
+		Log.i("MAIN", "Found " + packages.size() + " packages");
 
-		for (PackageStats stats : packStats)
-			packages.add(new InstalledPackage(stats, packageManager));
-
-		Log.d("MAIN", "convert time: " + ((new Date()).getTime() - start.getTime()) / 1000.0);
-		start = new Date();
-
-		Collections.sort(packages, new InstalledPackageComparator());
+		packages = new ArrayList<InstalledPackage>(packages);
+		Collections.sort((List<InstalledPackage>) packages, new InstalledPackageComparator());
 
 		Log.d("MAIN", "sort time: " + ((new Date()).getTime() - start.getTime()) / 1000.0);
 		start = new Date();
@@ -53,6 +47,7 @@ public class MainActivity extends Activity {
 			adapter.add(pack.getName() + " " + pack.getTotalSizeInMb());
 
 		Log.d("MAIN", "add time: " + ((new Date()).getTime() - start.getTime()) / 1000.0);
+		Log.i("MAIN", "Found " + packages.size() + " packages");
 	}
 
 	@Override
